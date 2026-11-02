@@ -121,6 +121,28 @@ class PgIterateGateParity(unittest.TestCase):
             elapsed="'brick' depends on axioms: [brick._native.native_decide.ax_1_1]\n",
         )
 
+    # Lean wraps a long `#print axioms` list across lines; a one-line capture would read
+    # nothing and still print ✅. These pin the across-line scan.
+    def test_wrapped_axiom_report_is_rejected(self):
+        self.assert_rejected(
+            CLEAN, 2, "cheat",
+            elapsed="'brick' depends on axioms: [propext, Classical.choice,\n"
+                    "  Quot.sound, cheat]\n",
+        )
+
+    def test_wrapped_standard_axiom_report_passes(self):
+        self.assert_accepted(
+            CLEAN,
+            elapsed="'brick' depends on axioms: [propext, Classical.choice,\n"
+                    "  Quot.sound]\n",
+        )
+
+    def test_unterminated_axiom_report_fails_closed(self):
+        self.assert_rejected(
+            CLEAN, 2, "never closes",
+            elapsed="'brick' depends on axioms: [propext, cheat\n",
+        )
+
     def test_documented_residual_stays_allowed(self):
         residual = documented_residual()
         if not residual:

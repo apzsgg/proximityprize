@@ -69,9 +69,40 @@ axiom_allowed() {
   sed -e 's/#.*//' "$RESIDUAL_ALLOWLIST" | awk 'NF {print $1}' \
     | grep -qxF -e "$name" -e "$simple"
 }
-REPORTED_AXIOMS="$(printf '%s\n' "$OUT" \
-  | sed -n 's/.*depends on axioms: \[\([^]]*\)\].*/\1/p' \
-  | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -v '^$' | sort -u || true)"
+# Lean wraps the printed list at the message width, so `[a, b,` and `]` can sit on different
+# lines. A one-line `sed` capture would then match nothing and audit NOTHING while still
+# printing ✅, so carry the open bracket across lines and treat an unterminated list as
+# unauditable instead of clean.
+AXIOM_SCAN="$(printf '%s\n' "$OUT" | awk '
+  BEGIN { marker = "depends on axioms: [" }
+  {
+    line = $0
+    if (!collecting) {
+      at = index(line, marker)
+      if (at == 0) next
+      line = substr(line, at + length(marker))
+      collecting = 1
+    }
+    endpos = index(line, "]")
+    if (endpos == 0) { buffer = buffer " " line; next }
+    buffer = buffer " " substr(line, 1, endpos - 1)
+    count = split(buffer, entry, ",")
+    for (i = 1; i <= count; i++) {
+      name = entry[i]
+      gsub(/^[ \t]+/, "", name); gsub(/[ \t]+$/, "", name)
+      if (name != "") print name
+    }
+    buffer = ""; collecting = 0
+  }
+  END { if (collecting) exit 3 }
+')" && AXIOM_SCAN_OK=1 || AXIOM_SCAN_OK=0
+if [[ $AXIOM_SCAN_OK -ne 1 ]]; then
+  echo "❌ FAIL (${ELAPSED}s) — a 'depends on axioms' line opens a list that never closes;" >&2
+  echo "   the reported axiom set cannot be read, so this run certifies nothing. Re-run" >&2
+  echo "   with the full '#print axioms' output." >&2
+  exit 2
+fi
+REPORTED_AXIOMS="$(printf '%s\n' "$AXIOM_SCAN" | sort -u)"
 UNAPPROVED=""
 if [[ -n "$REPORTED_AXIOMS" ]]; then
   while IFS= read -r AX; do
